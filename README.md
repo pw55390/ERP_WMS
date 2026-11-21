@@ -1,4 +1,3 @@
-# ERP_WMS[README.md](https://github.com/user-attachments/files/35208127/README.md)
 # E-Magazyn ERP / WMS
 
 ## Zintegrowane zarządzanie skupem, magazynem, produkcją i sprzedażą
