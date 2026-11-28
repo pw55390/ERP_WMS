@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-emagazyn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-emagazyn_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-emagazyn}
+    volumes:
+      - emagazyn_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-emagazyn} -d ${POSTGRES_DB:-emagazyn}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Uwaga: w docelowym wdrożeniu za firmowym VPN nie publikuj portu 5432 na interfejs publiczny!
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-emagazyn}:${POSTGRES_PASSWORD:-emagazyn_dev_password}@postgres:5432/${POSTGRES_DB:-emagazyn}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-zmien-ten-sekret-przed-wdrozeniem-za-vpn-min-32-znaki}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      SCALE_SIMULATOR_ENABLED: ${SCALE_SIMULATOR_ENABLED:-true}
+      GUS_SIMULATOR_ENABLED: ${GUS_SIMULATOR_ENABLED:-true}
+    # Docelowo wystawiać wyłącznie za reverse proxy (TLS 1.3) osiągalnym przez firmowy VPN
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  emagazyn_pgdata:

@@ -99,3 +99,94 @@ E-Magazyn ERP / WMS koncentruje się na gospodarce magazynowej i produkcyjnej or
 
 Projekt definiuje wymagania i docelowy zakres produktu. Kolejne etapy obejmują projekt systemu, implementację bazy danych i aplikacji oraz weryfikację funkcji przed przygotowaniem wydania przeznaczonego dla przedsiębiorstw z branży.
 
+W repozytorium znajduje się obecnie **uruchamialny prototyp MVP** realizujący uzgodnione przepływy P1–P4 oraz fakturowanie FS/PDF (nie jest to ukończony, certyfikowany ani gotowy do sprzedaży produkt komercyjny).
+
+---
+
+## Prototyp MVP — architektura, uruchomienie i ograniczenia
+
+### Wybrany stos technologiczny
+
+- **Backend i API:** Python 3.13+, FastAPI, SQLAlchemy 2.0, Alembic (migracje schematu), Pydantic v2, Argon2id (`argon2-cffi`), JWT + Refresh Token (`PyJWT`), ReportLab (natywne generowanie PDF dla PZ, WZ, FS).
+- **Baza danych:** Docelowo **PostgreSQL 16** (z kolumnami `NUMERIC(12,3)`, `JSONB` dla dziennika audytu i blokadą wiersza `SELECT ... FOR UPDATE` w transakcjach ACID). W lokalnym trybie demonstracyjnym bez uruchomionego serwera PostgreSQL aplikacja może działać na bazie SQLite (`sqlite:///./emagazyn_demo.db`).
+- **Frontend:** React 19 + TypeScript + Vite (interfejs responsywny, przyciski >= 48 px, wysoki kontrast, obsługa skanerów kodów emulujących klawiaturę).
+
+### Wymagania wstępne
+
+- **Lokalne uruchomienie bez kontenerów:** Python `>= 3.11`, menedżer pakietów `uv`, Node.js `>= 20` + `npm`.
+- **Uruchomienie z PostgreSQL:** Docker + Docker Compose (`docker-compose.yml`).
+
+### Szybkie uruchomienie lokalne (tryb demonstracyjny)
+
+1. Skopiuj konfigurację przykładową (opcjonalnie; domyślne zmienne uruchomienia demo działają od razu):
+   ```powershell
+   copy .env.example .env
+   ```
+2. Zainstaluj zależności i zbuduj frontend:
+   ```powershell
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+3. Uruchom migracje i serwer backendu (serwuje zarówno API `/api/*`, jak i zbudowany frontend pod `http://127.0.0.1:8000`):
+   ```powershell
+   cd backend
+   uv sync
+   uv run alembic upgrade head
+   uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+   ```
+4. Tryb deweloperski frontendu (z hot-reload na `http://localhost:5173`):
+   ```powershell
+   cd frontend
+   npm run dev
+   ```
+5. Testy automatyczne przepływów P1–P4 i RBAC:
+   ```powershell
+   cd backend
+   uv run pytest -v
+   ```
+
+### Uruchomienie z PostgreSQL (Docker Compose)
+
+Po zbudowaniu paczki `frontend/dist` (`cd frontend && npm run build`):
+```powershell
+docker compose up --build
+```
+Aplikacja będzie dostępna lokalnie pod `http://127.0.0.1:8000` z bazą PostgreSQL 16.
+
+### Konta demonstracyjne (wyłącznie lokalne środowisko demo)
+
+> **Uwaga bezpieczeństwa:** Poniższe poświadczenia służą **wyłącznie** do lokalnego uruchomienia demonstracyjnego prototypu (gdy `DEMO_MODE=true`). Nigdy nie używaj tych kont ani haseł w środowisku produkcyjnym.
+
+| Login | Rola | Zakres w prototypie |
+|---|---|---|
+| `op_wag` | `OP_WAG` | P1: waga (symulator), jakość, partia surowca, PZ, nowi dostawcy (GUS symulacja) |
+| `inz_prod` | `INZ_PROD` | P2: wersjonowane BOM, zlecenia produkcyjne, RW, PW, bilans 0,5%, raport wydajności |
+| `mag_wg` | `MAG_WG` | P3: kompletacja FEFO, skanowanie, blokada przeterminowanych partii, WZ, spis z natury |
+| `fakt_ks` | `FAKT_KS` | P3/Finanse: zamówienia, cenniki kontrahentów, FS z WZ, ręczna zmiana ceny (audyt), FS-KOR, FZ, PDF |
+| `kier_mag` | `KIER_MAG` | P1–P4: kody awarii wagi, zgody jakościowe, akceptacja strat >3%, MM, inwentaryzacja z blokadą strefy, raport rotacji |
+| `admin` | `ADMIN` | Konta, role RBAC, konfiguracja progów systemowych, podgląd dziennika audytu |
+
+Hasło demo dla wszystkich kont w lokalnym trybie `DEMO_MODE=true`: `Demo!2026`.  
+Przykładowy jednorazowy kod autoryzacji awarii wagi (UC-01.5): `KIER-AWARIA-2026` (kolejne kody generuje `KIER_MAG` w panelu administracyjnym).
+
+### Niejednoznaczność progu wilgotności (15% vs 16,5%)
+
+W materiałach projektowych występują dwie wartości dopuszczalnej wilgotności ziarna: **15%** (README oraz RF-01.2) oraz **16,5%** (diagramy UML/Lista 2). W prototypie wartość ta nie jest zaszyta na stałe — jest pobierana z tabeli `konfiguracja_systemowa` (klucz `prog_wilgotnosci_pct`, wartość domyślna **15.000%**) i może zostać zmieniona przez `ADMIN` bez zmiany kodu. Wartość docelowa wymaga formalnego zatwierdzenia przez właściciela procesu.
+
+### Elementy symulowane oraz świadome ograniczenia prototypu
+
+- **Waga najazdowa (`AdapterWagi`):** działa w jawnym trybie `SYMULACJA` (generuje realistyczne odczyty brutto/tary oraz pozwala przetestować scenariusz awarii z kodem `KIER_MAG`). Brak integracji ze sprzętem RS-232/Modbus.
+- **API GUS (`AdapterGUS`):** działa w jawnym trybie `SYMULACJA` dla wybranych numerów NIP demo; brak połączenia produkcyjnego z usługą GUS BIR1.
+- **2FA, TLS 1.3, kopie zapasowe WAL i wydajność NFR:** lokalny prototyp HTTP nie egzekwuje 2FA przy logowaniu, nie ma skonfigurowanego TLS 1.3, automatycznych kopii WAL co 15 min ani testów obciążeniowych dla 50/100 równoczesnych użytkowników.
+- **Dziennik audytowy:** jest append-only na poziomie logiki aplikacji (w docelowym wdrożeniu PostgreSQL należy odebrać uprawnienia `UPDATE`/`DELETE` roli aplikacyjnej na tabeli `wpisy_audytowe`).
+
+### Model wdrożenia za firmowym VPN (docelowa architektura produkcyjna)
+
+Repozytorium GitHub służy wyłącznie do przechowywania kodu źródłowego, a nie jako hosting backendu i bazy danych. Docelowo:
+1. Aplikacja (FastAPI + zbudowany frontend) oraz PostgreSQL działają na serwerze lub w prywatnej sieci zakładowej (VPC/VLAN) bez publicznego dostępu do portu bazy danych (`5432`).
+2. Dostęp z internetu odbywa się wyłącznie po zestawieniu połączenia z **firmowym VPN**, poprzez reverse proxy (np. Nginx/Caddy/Traefik) wymuszające **HTTPS (TLS 1.3)** i nagłówki bezpieczeństwa.
+3. Wdrożenie produkcyjne wymaga wyłączenia trybu demo (`DEMO_MODE=false`), ustawienia silnego `JWT_SECRET_KEY`, włączenia 2FA dla ról uprzywilejowanych (`KIER_MAG`, `FAKT_KS`, `ADMIN`), polityki kopii bazy 24h + WAL 15 min oraz konfiguracji prawdziwych adapterów wagi i GUS.
+
+
